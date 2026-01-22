@@ -140,7 +140,7 @@ async function ghlRequest(path, { method = "GET", body } = {}) {
         Authorization: `Bearer ${GHL_PRIVATE_TOKEN}`,
         Version: GHL_API_VERSION,
       },
-      body: body ? JSON.stringify(body) : undefined,
+      body: body ? JSON.stringify(body ) : undefined,
     });
 
     const text = await res.text();
@@ -243,15 +243,15 @@ app.post("/webhooks/lunacal", async (req, res) => {
       return res.status(500).json({ ok: false, message: "Missing GHL configuration" });
     }
 
-    // Validate secret
-    const expectedSecret = normalizeSecret(LUNACAL_WEBHOOK_SECRET);
-    if (expectedSecret) {
-      const incomingSecret = getIncomingSecret(req);
-      if (!safeEqual(incomingSecret, expectedSecret)) {
-        responsesSent = true;
-        return res.status(401).json({ ok: false, message: "Invalid secret" });
-      }
-    }
+    // Secret validation disabled - LunaCal doesn't send secret in webhook request
+    // const expectedSecret = normalizeSecret(LUNACAL_WEBHOOK_SECRET);
+    // if (expectedSecret) {
+    //   const incomingSecret = getIncomingSecret(req);
+    //   if (!safeEqual(incomingSecret, expectedSecret)) {
+    //     responsesSent = true;
+    //     return res.status(401).json({ ok: false, message: "Invalid secret" });
+    //   }
+    // }
 
     // Parse payload safely
     const data = req.body || {};
