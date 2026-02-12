@@ -74,6 +74,43 @@ function extractAttendee(payload) {
   }
 }
 
+/**
+ * Normalizes drop-down values for GHL compatibility.
+ * GHL drop-downs are case-sensitive and space-sensitive.
+ * This helper tries to match the input value to a set of known common options.
+ */
+function normalizeDropdownValue(value) {
+  if (!value) return value;
+  const val = String(value).trim();
+  
+  // Mapping for "What's your role"
+  const roleOptions = {
+    "ceo / founder": "CEO / Founder",
+    "ceo/founder": "CEO / Founder",
+    "chief marketing officer": "Chief Marketing Officer",
+    "seo director": "SEO Director",
+    "seo manager": "SEO Manager",
+    "marketing manager": "Marketing Manager",
+    "other": "Other"
+  };
+
+  // Mapping for "What's your current link budget per month"
+  const budgetOptions = {
+    "less than $5,000": "Less than $5,000",
+    "less than $5000": "Less than $5,000",
+    "between $5,000 - $10,000": "Between $5,000 - $10,000",
+    "between $5000 - $10000": "Between $5,000 - $10,000",
+    "more than $10,000": "More than $10,000",
+    "more than $10000": "More than $10,000"
+  };
+
+  const normalized = val.toLowerCase();
+  if (roleOptions[normalized]) return roleOptions[normalized];
+  if (budgetOptions[normalized]) return budgetOptions[normalized];
+
+  return val;
+}
+
 function extractCustomFields(payload) {
   const fields = {};
   const responses = payload?.responses || {};
@@ -88,8 +125,10 @@ function extractCustomFields(payload) {
       const normalizedTarget = targetLabel.trim().toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ');
 
       if (actualLabel === normalizedTarget) {
-        fields[ghlKey] = responses[key].value;
-        console.log(`[Debug] Match found! Label: "${targetLabel}" -> GHL Key: "${ghlKey}", Value: "${responses[key].value}"`);
+        const rawValue = responses[key].value;
+        const finalValue = normalizeDropdownValue(rawValue);
+        fields[ghlKey] = finalValue;
+        console.log(`[Debug] Match found! Label: "${targetLabel}" -> GHL Key: "${ghlKey}", Raw: "${rawValue}", Final: "${finalValue}"`);
         found = true;
         break;
       }
