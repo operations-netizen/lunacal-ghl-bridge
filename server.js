@@ -140,6 +140,8 @@ async function createAppointment({ contactId, startTime, endTime, title, calenda
     title: String(title || "LunaCal Booking"),
     startTime: String(startTime),
     endTime: String(endTime),
+    // Added to bypass slot validation errors
+    ignoreFreeSlotValidation: true
   };
 
   console.log(`[Create Appointment] Data:`, JSON.stringify(body));
@@ -150,7 +152,6 @@ async function createAppointment({ contactId, startTime, endTime, title, calenda
 app.post("/webhooks/lunacal", async (req, res) => {
   try {
     console.log("--- New LunaCal Webhook Received ---");
-    // console.log("Full Body:", JSON.stringify(req.body, null, 2)); // Uncomment for extreme debugging
 
     if (!GHL_PRIVATE_TOKEN || !GHL_LOCATION_ID) {
       console.error("[Config Error] Missing GHL_PRIVATE_TOKEN or GHL_LOCATION_ID");
