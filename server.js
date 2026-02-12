@@ -20,11 +20,7 @@ const {
   GHL_PRIVATE_TOKEN,
   GHL_LOCATION_ID,
   GHL_API_VERSION = "2021-07-28",
-  // Map of organizer email to GHL Calendar ID
-  // Format: "email1:id1,email2:id2"
   CALENDAR_MAPPING = "",
-  // Map of LunaCal Question Label to GHL Custom Field Key
-  // Format: "Label 1:field_key_1,Label 2:field_key_2"
   CUSTOM_FIELD_MAPPING = "",
 } = process.env;
 
@@ -48,14 +44,6 @@ if (CUSTOM_FIELD_MAPPING) {
 }
 
 // ============ HELPERS ============
-function safeJson(v) {
-  try {
-    return JSON.stringify(v, null, 2);
-  } catch {
-    return String(v);
-  }
-}
-
 function normalizeTime(v) {
   try {
     if (!v) return null;
@@ -83,10 +71,7 @@ function extractAttendee(payload) {
 function extractCustomFields(payload) {
   const fields = {};
   const responses = payload?.responses || {};
-  
-  // Iterate through fieldMap and see if the label exists in LunaCal responses
   for (const [label, ghlKey] of fieldMap.entries()) {
-    // Look for the label in responses
     for (const key in responses) {
       if (responses[key]?.label === label && responses[key]?.value !== undefined) {
         fields[ghlKey] = responses[key].value;
@@ -99,6 +84,8 @@ function extractCustomFields(payload) {
 // ============ GHL API ============
 async function ghlRequest(path, { method = "GET", body } = {}) {
   const url = `https://services.leadconnectorhq.com${path}`;
+  console.log(`[GHL Request] ${method} ${url}`);
+  
   const res = await fetch(url, {
     method,
     headers: {
@@ -112,18 +99,17 @@ async function ghlRequest(path, { method = "GET", body } = {}) {
 
   const text = await res.text();
   let data = {};
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = { raw: text };
-  }
+  try { data = JSON.parse(text); } catch { data = { raw: text }; }
 
   if (!res.ok) {
+    console.error(`[GHL Error] Status: ${res.status}, Response:`, JSON.stringify(data));
     const err = new Error(`GHL API error ${res.status}`);
     err.status = res.status;
     err.response = data;
     throw err;
   }
+  
+  console.log(`[GHL Success] Status: ${res.status}`);
   return data;
 }
 
@@ -139,8 +125,11 @@ async function upsertContact({ name, email, phone, customFields }) {
     }))
   };
 
+  console.log(`[Upsert Contact] Data:`, JSON.stringify(body));
   const resp = await ghlRequest("/contacts/upsert", { method: "POST", body });
-  return resp?.contact?.id || resp?.contactId || resp?.id || null;
+  const contactId = resp?.contact?.id || resp?.contactId || resp?.id || null;
+  console.log(`[Upsert Contact] Result Contact ID: ${contactId}`);
+  return contactId;
 }
 
 async function createAppointment({ contactId, startTime, endTime, title, calendarId }) {
@@ -153,19 +142,26 @@ async function createAppointment({ contactId, startTime, endTime, title, calenda
     endTime: String(endTime),
   };
 
+  console.log(`[Create Appointment] Data:`, JSON.stringify(body));
   return await ghlRequest("/calendars/events/appointments", { method: "POST", body });
 }
 
 // ============ ROUTES ============
 app.post("/webhooks/lunacal", async (req, res) => {
   try {
+    console.log("--- New LunaCal Webhook Received ---");
+    // console.log("Full Body:", JSON.stringify(req.body, null, 2)); // Uncomment for extreme debugging
+
     if (!GHL_PRIVATE_TOKEN || !GHL_LOCATION_ID) {
+      console.error("[Config Error] Missing GHL_PRIVATE_TOKEN or GHL_LOCATION_ID");
       return res.status(500).json({ ok: false, message: "Missing GHL configuration" });
     }
 
     const data = req.body || {};
     const triggerEvent = String(data?.triggerEvent || data?.event || data?.type || "");
     const payload = data?.payload || data;
+
+    console.log(`[Event] ${triggerEvent}`);
 
     if (triggerEvent.toUpperCase().includes("PING")) {
       return res.status(200).json({ ok: true, message: "Received PING." });
@@ -179,30 +175,52 @@ app.post("/webhooks/lunacal", async (req, res) => {
 
     // Identify Calendar ID
     const organizerEmail = payload?.organizer?.email?.toLowerCase();
+    console.log(`[Organizer Email] ${organizerEmail}`);
+    
     let targetCalendarId = process.env.GHL_CALENDAR_ID; // Default
 
     if (organizerEmail && calendarMap.has(organizerEmail)) {
       targetCalendarId = calendarMap.get(organizerEmail);
-      console.log(`Matched organizer ${organizerEmail} to calendar ${targetCalendarId}`);
+      console.log(`[Calendar Match] Found specific calendar: ${targetCalendarId}`);
     } else {
-      console.log(`No specific calendar for ${organizerEmail}, using default: ${targetCalendarId}`);
+      console.log(`[Calendar Match] Using default/fallback calendar: ${targetCalendarId}`);
     }
 
     if (!email || !startTime || !endTime || !targetCalendarId) {
-      return res.status(400).json({ ok: false, message: "Missing required fields", debug: { email, startTime, endTime, targetCalendarId } });
+      console.error("[Validation Error] Missing required fields:", { email, startTime, endTime, targetCalendarId });
+      return res.status(400).json({ 
+        ok: false, 
+        message: "Missing required fields", 
+        debug: { email, startTime, endTime, targetCalendarId } 
+      });
     }
 
-    console.log(`Processing booking for ${email} with organizer ${organizerEmail}`);
+    console.log(`[Sync] Starting sync for ${email}`);
     const contactId = await upsertContact({ name, email, phone, customFields });
-    await createAppointment({ contactId, startTime, endTime, title, calendarId: targetCalendarId });
+    
+    if (!contactId) {
+      throw new Error("Failed to get contactId from GHL");
+    }
 
-    return res.status(200).json({ ok: true, message: "Synced to GoHighLevel", contactId, calendarId: targetCalendarId });
+    const appointment = await createAppointment({ contactId, startTime, endTime, title, calendarId: targetCalendarId });
+    console.log(`[Sync] Appointment created successfully:`, JSON.stringify(appointment));
+
+    return res.status(200).json({ 
+      ok: true, 
+      message: "Synced to GoHighLevel", 
+      contactId, 
+      calendarId: targetCalendarId,
+      appointmentId: appointment?.id
+    });
   } catch (err) {
-    console.error("Webhook error:", err.message);
+    console.error("[Webhook Error]", err.message);
     res.status(500).json({ ok: false, message: err.message });
   }
 });
 
 app.get("/health", (req, res) => res.status(200).json({ ok: true, message: "healthy" }));
 
-app.listen(PORT, () => console.log(`✅ Server listening on port: ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`✅ Server listening on port: ${PORT}`);
+  console.log(`CALENDAR_MAPPING set for: ${Array.from(calendarMap.keys()).join(", ")}`);
+});
