@@ -134,13 +134,14 @@ async function ghlRequest(path, { method = "GET", body } = {}) {
   return data;
 }
 
-async function upsertContact({ name, email, phone, customFields }) {
+async function upsertContact({ name, email, phone, customFields, tags }) {
   const body = {
     locationId: GHL_LOCATION_ID,
     name: String(name || "Unknown"),
     email: String(email || ""),
     source: "Lunacal",
     ...(phone ? { phone: String(phone) } : {}),
+    ...(tags && tags.length > 0 ? { tags } : {}),
     customFields: Object.entries(customFields).map(([key, value]) => {
       if (key.startsWith("contact.")) {
         return { key: key, value: value };
@@ -224,7 +225,10 @@ app.post("/webhooks/lunacal", async (req, res) => {
       return res.status(400).json({ ok: false, message: "Missing required fields" });
     }
 
-    const contactId = await upsertContact({ name, email, phone, customFields });
+    // Add the specific tag requested by the user
+    const tags = ["etail 2026"];
+
+    const contactId = await upsertContact({ name, email, phone, customFields, tags });
     const appointment = await createAppointment({ 
       contactId, 
       startTime, 
